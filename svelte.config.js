@@ -1,13 +1,22 @@
-// Tauri doesn't have a Node.js server to do proper SSR
-// so we will use adapter-static to prerender the app (SSG)
-// See: https://v2.tauri.app/start/frontend/sveltekit/ for more info
-import adapter from "@sveltejs/adapter-static";
+import adapter from '@sveltejs/adapter-static'; // Use the static adapter for Tauri
 
-/** @type {import('@sveltejs/kit').Config} */
+
+const prerenderEntries = [
+  '/', // Prerender the homepage
+  '/roadmap',
+  '/settings',
+  '/workspace/1',
+  '/workspace/1/machine/1',
+  '/workspace/1/machine/1/port/1',
+];
+
 const config = {
   kit: {
     adapter: adapter(),
-  },
+    prerender: {
+      entries: prerenderEntries
+    }
+  }
 };
 
 export default config;

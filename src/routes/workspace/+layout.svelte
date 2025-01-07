@@ -1,5 +1,32 @@
 <script>
-    import {Settings, Map} from 'lucide-svelte';
+    import { page } from '$app/stores';
+    import { invoke } from '@tauri-apps/api/core';
+    import {Settings, Map, Monitor, FileWarning, icons} from 'lucide-svelte';
+    import { onMount } from 'svelte';
+
+    /**
+     * @type {any[]}
+     */
+    let machines = [];
+
+  onMount(() => {
+      const unsubscribe = page.subscribe(async ($page) => {
+        try {
+          const network_id_str = $page.params.network_id;
+          const network_id = parseInt(network_id_str);
+          console.log(network_id);
+          const databaseJson = await invoke('machines', { workspaceId: network_id });
+          machines = JSON.parse(databaseJson);
+          console.log(machines);
+        } catch (error) {
+          console.error("Error fetching workspace:", error);
+        }
+      });
+  
+      return () => {
+        unsubscribe();
+      };
+    });
   </script>
   
   <style>
@@ -67,7 +94,7 @@
     }
     .icon-align {
       vertical-align: middle;
-      padding-right: 0.5rem;
+      padding-right: 1rem;
       position: relative;
       top: 5px;
     }
@@ -80,18 +107,25 @@
         border: none;
         margin-bottom: 2rem;
     }
+
   </style>
   
   <div class="layout">
     <nav class="sidebar">
         <h1 class="logo">AutomaSploit</h1>
         <button type="button" class="newscan-btn">+</button>
-        <h3>Scans</h3>
+        <h3>Machines</h3>
         <hr/>
       <ul>
-        <li><a href="/School">School</a></li>
-        <li><a href="/12-06-2024">12-06-2024</a></li>
-        <li><a href="/">Work</a></li>
+
+        {#each machines as machine}
+          {#if machine.icon == "PC"}
+            <li><a href="/workspace/{$page.params.network_id}/machine/{machine.id}"><span class="icon-align"><Monitor size="24" /></span>{machine.hostname}</a></li>
+          {:else}
+            <li><a href="/workspace/{$page.params.network_id}/machine/{machine.id}"><span class="icon-align"><FileWarning size="24" /></span>{machine.hostname}</a></li>
+          {/if}
+        {/each}
+
       </ul>
       <ul class="bottom-links">
         

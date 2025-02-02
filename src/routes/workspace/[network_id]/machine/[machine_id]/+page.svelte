@@ -13,6 +13,8 @@
 
   let machine = {};
 
+  let scanning = false;
+
   onMount(() => {
     const unsubscribe = page.subscribe(async ($page) => {
       try {
@@ -55,6 +57,32 @@
       unsubscribe();
     };
   });
+
+  async function scanMachine() {
+    try {
+      scanning = true;
+      const workspaceId = parseInt($page.params.network_id);
+      const machineId = parseInt($page.params.machine_id);
+      console.log(`Starting scan for machine ${machineId} in workspace ${workspaceId}`);
+      console.log(`Scanning machine: ${machine.hostname} (${machine.ip})`);
+      
+      const response = await invoke('scan_machine', { workspaceId, machineId });
+      console.log("Scan completed:", response);
+      
+      console.log("Fetching updated port information...");
+      const databaseJson = await invoke("ports", {
+        workspaceId: workspaceId,
+        machineId: machineId,
+      });
+      ports = JSON.parse(databaseJson);
+      console.log(`Found ${ports.length} ports:`, ports);
+    } catch (error) {
+      console.error("Error during machine scan:", error);
+    } finally {
+      scanning = false;
+      console.log("Scan process completed");
+    }
+  }
 </script>
 
 <main>
@@ -68,18 +96,38 @@
   </div>
 
   <div class="ports">
-    {#each ports as port}
-      <div class="component">
-        <ul class="info">
-          <li>{port.service}</li>
-          <li>{port.number}</li>
-        </ul>
-        <div class="security-status-critical">Critical</div>
-        <hr>
-        <div class="no-notes">NO NOTES</div>
-        <a href="/workspace/{$page.params.network_id}/machine/{$page.params.machine_id}/port/{port.number}">Notes</a>
-      </div>
-    {/each}
+    {#if ports.length === 0}
+        <div class="no-ports-message">No open ports found on this machine</div>
+    {:else}
+        {#each ports as port}
+            <div class="component">
+                <ul class="info">
+                    <li>{port.service}</li>
+                    <li>{port.number}</li>
+                </ul>
+                <div class="port-details">
+                    <p>{port.protocol} - {port.state}</p>
+                    {#if port.application}
+                        <p>{port.application}</p>
+                    {/if}
+                    {#if port.details && port.details.length > 0}
+                        <p class="details-available">Details Available</p>
+                    {/if}
+                </div>
+                <div class="security-status-critical">Critical</div>
+                <hr>
+                <a href="/workspace/{$page.params.network_id}/machine/{$page.params.machine_id}/port/{port.number}">View Details</a>
+            </div>
+        {/each}
+    {/if}
+  </div>
+
+  <div class="scan-btn-container">
+    <button class="scan-btn" 
+            on:click={scanMachine} 
+            disabled={scanning}>
+        {scanning ? 'Scanning...' : 'Scan Machine'}
+    </button>
   </div>
 </main>
 
@@ -159,6 +207,16 @@
     gap: 3rem;
   }
 
+  .no-ports-message {
+    width: 100%;
+    text-align: center;
+    font-size: x-large;
+    padding: 2rem;
+    border: 2px solid black;
+    border-radius: 1rem;
+    margin: 2rem 0;
+  }
+
   a {
     padding: 1rem;
     border: black 2px solid;
@@ -186,5 +244,42 @@
     border-radius: 1rem;
     color: white;
     font-size: x-large;
+  }
+
+  .scan-btn-container {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+  }
+
+  .scan-btn {
+    padding: 1rem;
+    border: black 3px solid;
+    border-radius: 0.5rem;
+    background-color: transparent;
+    color: black;
+    font-size: large;
+    cursor: pointer;
+  }
+  .scan-btn:hover {
+    background-color: black;
+    color: white;
+    border: white 3px solid;
+  }
+  .scan-btn[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .port-details {
+    padding: 0.5rem 1rem;
+    font-size: medium;
+  }
+  .port-details p {
+    margin: 0.25rem 0;
+  }
+  .details-available {
+    color: green;
+    font-weight: bold;
   }
 </style>

@@ -29,9 +29,24 @@
       {/each}
     </div>
   {/if}
+  <a class="create" href="/workspace/create/name">Create new workspace</a>
 </main>
 
 <style>
+
+
+  .create {
+    border-radius: 1rem;
+    border: 3px solid black;
+    padding: 1rem;
+    text-decoration: none;
+    color: black;
+  }
+
+  .create:hover {
+    background-color: black;
+    color: white;
+  }
 
   .no-scan-message {
     display: flex;
@@ -40,7 +55,7 @@
     height: 98vh;
     font-size: 1.5rem;
     text-align: center;
-    color: #333;
+    color: black;
     flex-direction: column;
     /* gap: 1rem; */
   }

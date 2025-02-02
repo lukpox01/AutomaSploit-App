@@ -35,7 +35,7 @@
 <main>
   <header>
     <p>{workspace.name}</p>
-    <p>10.5.9.0/16</p>
+    <p>{workspace.ip_range}</p>
   </header>
 </main>
 

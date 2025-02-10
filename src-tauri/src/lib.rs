@@ -5,6 +5,9 @@ use tauri::State;
 use reqwest;
 use futures::StreamExt;
 use std::process::Command;
+use std::fs;
+use std::path::PathBuf;
+use std::env;  // Add this for getting home directory
 
 #[derive(Clone,Serialize,Deserialize)]
 struct Port {
@@ -105,6 +108,70 @@ struct ToolStatus {
     rustscan: bool,
     nmap: bool,
     ollama: bool,
+}
+
+#[cfg(target_os = "windows")]
+fn get_data_dir() -> PathBuf {
+    let app_data = env::var("APPDATA")
+        .expect("Failed to get APPDATA directory");
+    let mut path = PathBuf::from(app_data);
+    path.push("NetVision");  // Your app name
+    path.push("workspaces");
+    fs::create_dir_all(&path).expect("Failed to create workspaces directory");
+    path
+}
+
+#[cfg(target_os = "linux")]
+fn get_data_dir() -> PathBuf {
+    let home = env::var("HOME")
+        .expect("Failed to get HOME directory");
+    let mut path = PathBuf::from(home);
+    path.push(".local");
+    path.push("share");
+    path.push("netvision");
+    path.push("workspaces");
+    fs::create_dir_all(&path).expect("Failed to create workspaces directory");
+    path
+}
+
+#[cfg(target_os = "macos")]
+fn get_data_dir() -> PathBuf {
+    let home = env::var("HOME")
+        .expect("Failed to get HOME directory");
+    let mut path = PathBuf::from(home);
+    path.push("Library");
+    path.push("Application Support");
+    path.push("NetVision");
+    path.push("workspaces");
+    fs::create_dir_all(&path).expect("Failed to create workspaces directory");
+    path
+}
+
+fn load_database() -> Database {
+    let path = get_data_dir().join("database.json");
+    if path.exists() {
+        let data = fs::read_to_string(path)
+            .expect("Failed to read database file");
+        serde_json::from_str(&data)
+            .unwrap_or_else(|_| Database {
+                name: "Default".to_string(),
+                data: vec![],
+            })
+    } else {
+        Database {
+            name: "Default".to_string(),
+            data: vec![],
+        }
+    }
+}
+
+fn save_database(database: &Database) -> Result<(), String> {
+    let path = get_data_dir().join("database.json");
+    let json = serde_json::to_string_pretty(&database)
+        .map_err(|e| format!("Failed to serialize database: {}", e))?;
+    fs::write(path, json)
+        .map_err(|e| format!("Failed to write database file: {}", e))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -286,6 +353,10 @@ fn add_workspace(database: State<Mutex<Database>>, name: String, ip_range: Strin
         ip_range,
     };
     db.data.push(new_workspace);
+    
+    // Save the updated database
+    save_database(&db)?;
+    
     Ok("Workspace added successfully".to_string())
 }
 
@@ -303,6 +374,8 @@ fn add_machine(database: State<Mutex<Database>>, workspace_id: u32, name: String
         ports: vec![],
     };
     workspace.data.push(new_machine);
+    
+    save_database(&db)?;
     Ok("Machine added successfully".to_string())
 }
 
@@ -344,6 +417,7 @@ async fn discover_hosts(database: State<'_, Mutex<Database>>, workspace_id: u32)
         workspace.data.push(new_machine);
     }
 
+    save_database(&db)?;
     println!("╚════ Network Discovery Complete ════");
     Ok(format!("Network scan completed. Found and added {} hosts", network_scan.active_hosts.len()))
 }
@@ -366,6 +440,7 @@ fn update_port_notes(
 
     port.data = notes;
     
+    save_database(&db)?;
     Ok("Port notes updated successfully".to_string())
 }
 
@@ -412,10 +487,7 @@ async fn check_tools() -> Result<String, String> {
 }
 
 pub fn run() {
-    let database = Database {
-        name: "Lukas".to_string(),
-        data: vec![],
-    };
+    let database = load_database();
 
     tauri::Builder::default()
         .manage(Mutex::new(database))

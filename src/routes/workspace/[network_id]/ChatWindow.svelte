@@ -10,7 +10,7 @@
     let currentMessage = '';
     let contextType = 'workspace';
     let machines = [];
-    let selectedMachine = null;
+    let selectedMachine: null = null;
     let selectedPort = null;
     let ports = [];
 
@@ -28,7 +28,7 @@
             workspaceId: workspace.id,
             machineId: selectedMachine
         });
-        ports = JSON.parse(portsJson);
+        ports = JSON.parse(portsJson as string);
     }
 
     $: if (workspace?.id) {

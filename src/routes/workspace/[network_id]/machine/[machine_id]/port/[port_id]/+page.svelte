@@ -92,13 +92,12 @@
 <main>
   <header>
     <div class="top-buttons">
-      <u class="btn back-btn"
+      <a href=".." class="btn back-btn"
         ><span class="btn-align"
           ><ChevronLeft size="64" stroke-width="5" /></span
-        ></u
+        ></a
       >
       <div class="right-buttons">
-        <button type="button" class="btn btn-vulns">Vulns</button>
         <button type="button" class="btn btn-scan">Scan</button>
       </div>
     </div>
@@ -151,6 +150,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    text-decoration: none;
+    color: inherit;
   }
 
   .back-btn:hover {

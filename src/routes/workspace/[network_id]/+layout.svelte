@@ -1,15 +1,18 @@
 <script>
     import { page } from '$app/stores';
     import { invoke } from '@tauri-apps/api/core';
-    import {Settings, Map, Monitor, FileWarning, icons} from 'lucide-svelte';
+    import {Settings, Map, Monitor, FileWarning, icons, MessageCircle} from 'lucide-svelte';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
+    import ChatWindow from './ChatWindow.svelte';
 
     /**
      * @type {any[]}
      */
     let machines = [];
     let scanning = false;
+    let showChat = false;
+    let currentWorkspace = {};
 
     onMount(() => {
         const unsubscribe = page.subscribe(async ($page) => {
@@ -20,6 +23,10 @@
                 const databaseJson = await invoke('machines', { workspaceId: network_id });
                 machines = JSON.parse(databaseJson);
                 console.log(machines);
+                const workspaceJson = await invoke('get_workspace', { 
+                    workspaceId: parseInt($page.params.network_id) 
+                });
+                currentWorkspace = JSON.parse(workspaceJson);
             } catch (error) {
                 console.error("Error fetching workspace:", error);
             }
@@ -107,6 +114,7 @@
         font-weight: bold;
         margin-bottom: 0.5rem;
         font-size: xx-large;
+        margin-left: 2rem;
     }
     hr {
         margin-top: 1rem;
@@ -158,11 +166,31 @@
         opacity: 0.5;
         cursor: not-allowed;
     }
+    .chat-btn {
+        position: fixed;
+        bottom: 1rem;
+        left: 19rem;  /* Changed from right: 1rem to left: 19rem to position it next to sidebar */
+        background-color: black;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 3.5rem;
+        height: 3.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 1000;
+    }
+
+    .chat-btn:hover {
+        background-color: #333;
+    }
 </style>
 
 <div class="layout">
     <nav class="sidebar">
-        <h1 class="logo">AutomaSploit</h1>
+        <h1 class="logo">NetVision</h1>
         <button class="newscan-btn" on:click={() => goto(`/workspace/${$page.params.network_id}/newscan`)}>+</button>
         <button class="scan-network-btn" 
                 on:click={scanNetwork} 
@@ -192,3 +220,13 @@
         <slot></slot>
     </div>
 </div>
+
+<button class="chat-btn" on:click={() => showChat = !showChat}>
+    <MessageCircle size={24} />
+</button>
+
+<ChatWindow 
+    show={showChat}
+    onClose={() => showChat = false}
+    workspace={currentWorkspace}
+/>

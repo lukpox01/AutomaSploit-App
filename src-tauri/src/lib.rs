@@ -1,7 +1,10 @@
 use serde::{Serialize, Deserialize};
+use serde_json::json;
 use std::{collections::HashMap, sync::Mutex, vec};
 use tauri::State;
 use reqwest;
+use futures::StreamExt;
+use std::process::Command;
 
 #[derive(Clone,Serialize,Deserialize)]
 struct Port {
@@ -87,6 +90,21 @@ struct ApiPort {
 struct NetworkScan {
     cidr: String,
     active_hosts: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChatContext {
+    type_: String,
+    workspace_id: u32,
+    machine_id: Option<u32>,
+    port_number: Option<u16>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ToolStatus {
+    rustscan: bool,
+    nmap: bool,
+    ollama: bool,
 }
 
 #[tauri::command]
@@ -351,6 +369,48 @@ fn update_port_notes(
     Ok("Port notes updated successfully".to_string())
 }
 
+#[tauri::command]
+async fn ask_question(question: String, context: ChatContext) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    
+    let mut context_data = serde_json::json!({
+        "question": question,
+        "context_type": context.type_,
+        "workspace_id": context.workspace_id,
+    });
+
+    if let Some(machine_id) = context.machine_id {
+        context_data["machine_id"] = json!(machine_id);
+    }
+
+    if let Some(port_number) = context.port_number {
+        context_data["port_number"] = json!(port_number);
+    }
+
+    let response = client.post("http://127.0.0.1:8084/ask")
+        .json(&context_data)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to call API: {}", e))?;
+
+    let text = response.text().await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+    
+    Ok(text)
+}
+
+#[tauri::command]
+async fn check_tools() -> Result<String, String> {
+    let response = reqwest::get("http://127.0.0.1:8084/tools")
+        .await
+        .map_err(|e| format!("Failed to call API: {}", e))?;
+
+    let text = response.text().await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+    
+    Ok(text)
+}
+
 pub fn run() {
     let database = Database {
         name: "Lukas".to_string(),
@@ -361,7 +421,8 @@ pub fn run() {
         .manage(Mutex::new(database))
         .invoke_handler(tauri::generate_handler![
             workspaces, machines, ports, get_machine, get_workspace, get_port, 
-            scan_ip, scan_machine, add_workspace, add_machine, discover_hosts, update_port_notes
+            scan_ip, scan_machine, add_workspace, add_machine, discover_hosts, 
+            update_port_notes, ask_question, check_tools
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -20,12 +20,17 @@ struct Port {
 }
 
 #[derive(Clone,Serialize,Deserialize)]
-enum PortNotes{
+enum PortNotes {
     NmapScan(Vec<String>),
     Credentials {
         name: Option<String>,
         hash: Option<String>,
         password: Option<String>
+    },
+    PentestNote {
+        stage: String,  // e.g., "Enumeration", "Exploitation", "Post-Exploitation"
+        content: String,
+        timestamp: String
     },
     None,
 }
@@ -253,12 +258,20 @@ async fn scan_machine(database: State<'_, Mutex<Database>>, workspace_id: u32, m
 #[tauri::command]
 fn workspaces(database: State<Mutex<Database>>) -> Result<String, String> {
     let db = database.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
-    let workspaces: Vec<JsWorkspace> = db.data.iter().map(|workspace| JsWorkspace {
-        id: workspace.id,
-        name: workspace.name.clone(),
-        ip_range: workspace.ip_range.clone(),
+    println!("Loading workspaces, found {} workspaces", db.data.len()); // Debug log
+    let workspaces: Vec<JsWorkspace> = db.data.iter().map(|workspace| {
+        println!("Processing workspace: {} ({})", workspace.name, workspace.id); // Debug log
+        JsWorkspace {
+            id: workspace.id,
+            name: workspace.name.clone(),
+            ip_range: workspace.ip_range.clone(),
+        }
     }).collect();
-    serde_json::to_string(&workspaces).map_err(|e| format!("Failed to serialize workspaces: {}", e))
+    
+    let json = serde_json::to_string(&workspaces)
+        .map_err(|e| format!("Failed to serialize workspaces: {}", e))?;
+    println!("Serialized workspaces: {}", json); // Debug log
+    Ok(json)
 }
 
 #[tauri::command]
@@ -444,26 +457,101 @@ fn update_port_notes(
     Ok("Port notes updated successfully".to_string())
 }
 
+#[tauri::command(rename_all = "camelCase")]
+fn update_note_content(
+    database: State<Mutex<Database>>,
+    workspaceId: u32,
+    machineId: u32,
+    portNumber: u16,
+    noteIndex: usize,
+    newContent: String,
+) -> Result<String, String> {
+    let mut db = database.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+    let port = db.data.iter_mut()
+        .find(|ws| ws.id == workspaceId)
+        .and_then(|ws| ws.data.iter_mut().find(|m| m.id == machineId))
+        .and_then(|m| m.ports.iter_mut().find(|p| p.number == portNumber))
+        .ok_or_else(|| "Port not found".to_string())?;
+
+    if noteIndex >= port.data.len() {
+        return Err("Note index out of bounds".into());
+    }
+
+    match &mut port.data[noteIndex] {
+        PortNotes::PentestNote { content, .. } => {
+            *content = newContent;
+            save_database(&db)?;
+            Ok("Note updated successfully".to_string())
+        },
+        _ => Err("Note at this index is not a PentestNote".into())
+    }
+}
+
 #[tauri::command]
-async fn ask_question(question: String, context: ChatContext) -> Result<String, String> {
+async fn ask_question<'a>(database: State<'a, Mutex<Database>>, question: String, context: ChatContext) -> Result<String, String> {
     let client = reqwest::Client::new();
     
-    let mut context_data = serde_json::json!({
-        "question": question,
-        "context_type": context.type_,
-        "workspace_id": context.workspace_id,
+    // Get all relevant context data from the database
+    let context_data = {
+        let db = database.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+        let mut context_str = String::new();
+        
+        if let Some(workspace) = db.data.iter().find(|w| w.id == context.workspace_id) {
+            context_str.push_str(&format!("Workspace: {}\n", workspace.name));
+            
+            if let Some(machine_id) = context.machine_id {
+                if let Some(machine) = workspace.data.iter().find(|m| m.id == machine_id) {
+                    context_str.push_str(&format!("Machine: {} ({})\n", machine.hostname, machine.ip));
+                    
+                    if let Some(port_number) = context.port_number {
+                        if let Some(port) = machine.ports.iter().find(|p| p.number == port_number) {
+                            context_str.push_str(&format!("Port {}/{} - {} ({})\n", 
+                                port.number, port.protocol, port.service, port.application));
+                            
+                            // Add all port notes
+                            for note in &port.data {
+                                match note {
+                                    PortNotes::NmapScan(details) => {
+                                        context_str.push_str("Nmap Scan Results:\n");
+                                        for detail in details {
+                                            context_str.push_str(&format!("- {}\n", detail));
+                                        }
+                                    },
+                                    PortNotes::Credentials { name, hash, password } => {
+                                        context_str.push_str("Credentials Found:\n");
+                                        if let Some(n) = name { context_str.push_str(&format!("- Username: {}\n", n)); }
+                                        if let Some(h) = hash { context_str.push_str(&format!("- Hash: {}\n", h)); }
+                                        if let Some(p) = password { context_str.push_str(&format!("- Password: {}\n", p)); }
+                                    },
+                                    PortNotes::PentestNote { stage, content, timestamp } => {
+                                        context_str.push_str(&format!("Pentest Note ({} - {}):\n{}\n", stage, timestamp, content));
+                                    },
+                                    PortNotes::None => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        context_str
+    };
+
+    // Combine context data with the question
+    let full_question = format!(
+        "You are an expert penetration tester and security analyst. Focus on identifying vulnerabilities, \
+        potential attack vectors, and security implications. Be direct and concise. \
+        Provide practical security insights based on this context:\n\n{}\n\nQuestion: {}", 
+        context_data, 
+        question
+    );
+
+    let payload = json!({
+        "question": full_question
     });
 
-    if let Some(machine_id) = context.machine_id {
-        context_data["machine_id"] = json!(machine_id);
-    }
-
-    if let Some(port_number) = context.port_number {
-        context_data["port_number"] = json!(port_number);
-    }
-
     let response = client.post("http://127.0.0.1:8084/ask")
-        .json(&context_data)
+        .json(&payload)
         .send()
         .await
         .map_err(|e| format!("Failed to call API: {}", e))?;
@@ -486,6 +574,88 @@ async fn check_tools() -> Result<String, String> {
     Ok(text)
 }
 
+#[tauri::command]
+async fn analyze_port(database: State<'_, Mutex<Database>>, workspace_id: u32, machine_id: u32, port_number: u16) -> Result<String, String> {
+    // Gather port info and create context in a separate scope
+    let context = {
+        let db = database.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+        let port = db.data.iter()
+            .find(|w| w.id == workspace_id)
+            .and_then(|w| w.data.iter().find(|m| m.id == machine_id))
+            .and_then(|m| m.ports.iter().find(|p| p.number == port_number))
+            .ok_or_else(|| "Port not found".to_string())?;
+
+        json!({
+            "text": format!(
+                "Analyze this port for security vulnerabilities:\n\
+                Service: {}\n\
+                Port: {}\n\
+                Protocol: {}\n\
+                State: {}\n\
+                Application: {}\n\n\
+                Scan Results:\n{}", 
+                port.service,
+                port.number,
+                port.protocol,
+                port.state,
+                port.application,
+                port.data.iter()
+                    .filter_map(|note| match note {
+                        PortNotes::NmapScan(details) => Some(details.join("\n")),
+                        _ => None
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        }).to_string()
+    };
+
+    // Make the API call
+    let client = reqwest::Client::new();
+    let payload = json!({
+        "question": format!(
+            "Security analysis of port scan.\n\
+            Format in Markdown:\n\
+            1. Critical Vulnerabilities\n\
+            2. Exploitation Methods\n\
+            3. Security Recommendations\n\n\
+            {}", 
+            context
+        )
+    });
+
+    let response = client.post("http://127.0.0.1:8084/ask")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to call AI API: {}", e))?;
+
+    let analysis = response.text().await
+        .map_err(|e| format!("Failed to read AI response: {}", e))?;
+
+    println!("Received AI analysis, updating database...");
+    // Update database
+    {
+        let mut db = database.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
+        let port = db.data.iter_mut()
+            .find(|w| w.id == workspace_id)
+            .and_then(|w| w.data.iter_mut().find(|m| m.id == machine_id))
+            .and_then(|m| m.ports.iter_mut().find(|p| p.number == port_number))
+            .ok_or_else(|| "Port not found".to_string())?;
+
+        let ai_note = PortNotes::NmapScan(vec![
+            "=== AI Security Analysis ===".to_string(),
+            analysis
+        ]);
+
+        port.data.push(ai_note);
+        save_database(&db)?;
+    }
+
+    println!("Analysis completed successfully");
+    Ok("Analysis completed and saved".to_string())
+}
+
 pub fn run() {
     let database = load_database();
 
@@ -494,7 +664,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             workspaces, machines, ports, get_machine, get_workspace, get_port, 
             scan_ip, scan_machine, add_workspace, add_machine, discover_hosts, 
-            update_port_notes, ask_question, check_tools
+            update_port_notes, update_note_content, ask_question, check_tools,
+            analyze_port
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

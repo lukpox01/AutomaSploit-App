@@ -7,9 +7,12 @@
   import { invoke } from "@tauri-apps/api/core";
   import { page } from "$app/stores";
   import CredentialModal from './CredentialModal.svelte';
+  import NoteModal from './NoteModal.svelte';
 
   let port = {};
   let showCredentialModal = false;
+  let showNoteModal = false;
+  let isAnalyzing = false;
 
   onMount(() => {
     const unsubscribe = page.subscribe(async ($page) => {
@@ -67,7 +70,9 @@
         }
       };
       
-      const newData = [...port.data, credNote];
+      // Create new array instead of spreading
+      const newData = port.data ? [...port.data] : [];
+      newData.push(credNote);
       
       await invoke('update_port_notes', {
         workspaceId: network_id,
@@ -85,6 +90,78 @@
       port = JSON.parse(portJson);
     } catch (error) {
       console.error("Error saving credentials:", error);
+    } finally {
+      closeCredentialModal();
+    }
+  }
+
+  function openNoteModal() {
+    showNoteModal = true;
+  }
+
+  function closeNoteModal() {
+    showNoteModal = false;
+  }
+
+  async function handleSaveNote(note) {
+    try {
+      const network_id = parseInt($page.params.network_id);
+      const machine_id = parseInt($page.params.machine_id);
+      const port_id = parseInt($page.params.port_id);
+      
+      // Create new array instead of spreading
+      const newData = port.data ? [...port.data] : [];
+      newData.push(note);
+      
+      await invoke('update_port_notes', {
+          workspaceId: network_id,
+          machineId: machine_id,
+          portNumber: port_id,
+          notes: newData
+      });
+
+      // Refresh port data
+      const portJson = await invoke("get_port", {
+          workspaceId: network_id,
+          machineId: machine_id,
+          portNumber: port_id
+      });
+      port = JSON.parse(portJson);
+    } catch (error) {
+      console.error("Error saving note:", error);
+    } finally {
+      closeNoteModal();
+    }
+  }
+
+  async function handleScan() {
+    try {
+      isAnalyzing = true;
+      const network_id = parseInt($page.params.network_id);
+      const machine_id = parseInt($page.params.machine_id);
+      const port_id = parseInt($page.params.port_id);
+
+      console.log('Starting port analysis...');
+      await invoke('analyze_port', {
+        workspaceId: network_id,
+        machineId: machine_id,
+        portNumber: port_id
+      });
+
+      console.log('Refreshing port data...');
+      // Refresh port data to show new analysis
+      const portJson = await invoke('get_port', {
+        workspaceId: network_id,
+        machineId: machine_id,
+        portNumber: port_id
+      });
+      port = JSON.parse(portJson);
+      console.log('Port data refreshed:', port);
+    } catch (error) {
+      console.error('Error during analysis:', error);
+      alert('Failed to analyze port: ' + error);
+    } finally {
+      isAnalyzing = false;
     }
   }
 </script>
@@ -98,7 +175,14 @@
         ></a
       >
       <div class="right-buttons">
-        <button type="button" class="btn btn-scan">Scan</button>
+        <button 
+          type="button" 
+          class="btn btn-scan" 
+          on:click={handleScan}
+          disabled={isAnalyzing}
+        >
+          {isAnalyzing ? 'Analyzing...' : 'Scan'}
+        </button>
       </div>
     </div>
 
@@ -118,15 +202,32 @@
 
         <div class="select-icon"><ChevronDown size="32" /></div>
       </div>
-      <button type="button" class="new-note-btn" on:click={openCredentialModal}>Add Credentials</button>
+      <div class="button-group">
+        <button type="button" class="new-note-btn" on:click={openNoteModal}>
+          Add Note
+        </button>
+        <button type="button" class="new-note-btn" on:click={openCredentialModal}>
+          Add Credentials
+        </button>
+      </div>
     </div>
   </header>
   <div class="content">
-
-    <Note data={port.data} details={port.details}/>
-
+    <Note 
+        data={port.data} 
+        details={port.details}
+        workspaceId={parseInt($page.params.network_id)}
+        machineId={parseInt($page.params.machine_id)}
+        portNumber={parseInt($page.params.port_id)}
+    />
   </div>
 </main>
+
+<NoteModal 
+    show={showNoteModal}
+    onClose={closeNoteModal}
+    onSave={handleSaveNote}
+/>
 
 <CredentialModal 
     show={showCredentialModal}
@@ -175,11 +276,23 @@
     color: white;
     background-color: black;
     padding-inline: 4vw;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+
+  .btn-scan:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .btn-scan:hover {
     background-color: white;
     color: black;
+    transform: scale(1.05);
+  }
+
+  .btn-scan:active {
+    transform: scale(0.95);
   }
 
   .btn-align {
@@ -248,5 +361,31 @@
     background-color: black;
     color: white;
     border: 2px solid white;
+  }
+
+  .button-group {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  main {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    height: 100%;
+  }
+
+  header {
+    position: sticky;
+    top: 0;
+    background-color: #f5faff;
+    padding-bottom: 1rem;
+    z-index: 10;
+  }
+
+  .content {
+    flex: 1;
+    overflow-y: auto;
   }
 </style>

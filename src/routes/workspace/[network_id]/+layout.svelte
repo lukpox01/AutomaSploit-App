@@ -71,10 +71,17 @@
         background-color: #f5faff;
     }
     .layout {
+        position: fixed;
+        bottom: 1rem;
+        top: 1rem;
+        left: 1rem;
+        right: 1rem;
         display: flex;
-        height: 98.5vh;
+        background-color: #f5faff;
+        gap: 1rem; /* Add gap between sidebar and content */
     }
     .sidebar {
+        height: 100%;
         padding: 1rem;
         border: black 1px solid;
         border-radius: 1rem;
@@ -82,6 +89,7 @@
         display: flex;
         flex-direction: column;
         justify-content: space-between;
+        overflow-y: auto;
     }
     .sidebar ul {
         list-style-type: none;
@@ -108,6 +116,10 @@
     .content {
         flex: 1;
         padding: 1rem;
+        overflow-y: auto; /* Allow content to scroll */
+        margin-right: 1rem; /* Add some space for potential scrollbar */
+        border: 1px solid #e5e7eb; /* Optional: adds a subtle border */
+        border-radius: 1rem; /* Optional: matches sidebar border radius */
     }
     .logo {
         font-size: 1.5rem;
@@ -185,6 +197,29 @@
 
     .chat-btn:hover {
         background-color: #333;
+    }
+
+    /* Make scrollbars look better */
+    .sidebar::-webkit-scrollbar,
+    .content::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .sidebar::-webkit-scrollbar-track,
+    .content::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb,
+    .content::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 4px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover,
+    .content::-webkit-scrollbar-thumb:hover {
+        background: #555;
     }
 </style>
 

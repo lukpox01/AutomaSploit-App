@@ -4,23 +4,31 @@
     import { CheckCircle, XCircle, AlertTriangle, Activity, CheckCircle2, XOctagon } from 'lucide-svelte';
     import { goto } from '$app/navigation';
 
+    interface ToolStatus {
+        installed: boolean;
+        running: boolean;
+    }
+
+    interface Tools {
+        rustscan: ToolStatus;
+        nmap: ToolStatus;
+        ollama: ToolStatus;
+    }
+
     let workspaces: any[] = [];
-    let toolStatus: {
-        rustscan: boolean;
-        nmap: boolean;
-        ollama: boolean;
-    } | null = null;
+    let toolStatus: Tools | null = null;
     let loading = true;
 
     onMount(async () => {
         try {
-            const [workspacesJson, toolsJson] = await Promise.all([
-                invoke('workspaces'),
-                invoke('check_tools')
-            ]);
-
-            workspaces = JSON.parse(workspacesJson as string);
-            toolStatus = JSON.parse(toolsJson as string);
+            // Explicitly await both promises
+            const toolsJson = await invoke('check_tools') as string;
+            toolStatus = JSON.parse(toolsJson);
+            
+            const workspacesJson = await invoke('workspaces') as string;
+            console.log('Workspaces JSON:', workspacesJson); // Debug log
+            workspaces = JSON.parse(workspacesJson);
+            console.log('Parsed workspaces:', workspaces); // Debug log
         } catch (error) {
             console.error('Error fetching data:', error);
         } finally {
@@ -29,21 +37,35 @@
     });
 
     const allToolsInstalled = () => {
-        return toolStatus && Object.values(toolStatus).every(status => status);
+        return toolStatus && Object.values(toolStatus).every(status => status.installed);
     };
 
-    function getServiceStatus(service: string, status: boolean) {
-        if (status) {
-            return 'Running';
+    function getServiceStatus(service: string, status: ToolStatus) {
+        if (service === 'ollama') {
+            if (status.installed && status.running) {
+                return 'Running';
+            }
+            return status.installed ? 'Installed' : 'Not installed';
         }
-        return 'Not installed';
+        return status.installed ? 'Installed' : 'Not installed';
     }
 
-    function getServiceIcon(status: boolean) {
-        if (status) {
-            return CheckCircle2;
+    function getServiceClass(service: string, status: ToolStatus): string {
+        if (service === 'ollama') {
+            if (status.installed && status.running) return 'running';
+            if (status.installed) return 'installed-not-running';
+            return 'stopped';
         }
-        return XOctagon;
+        return status.installed ? 'running' : 'stopped';
+    }
+
+    function getServiceIcon(service: string, status: ToolStatus) {
+        if (service === 'ollama') {
+            if (status.installed && status.running) return CheckCircle2;
+            if (status.installed) return Activity;
+            return XOctagon;
+        }
+        return status.installed ? CheckCircle2 : XOctagon;
     }
 </script>
 
@@ -54,9 +76,9 @@
             <div class="tools-status">
                 <div class="services-list">
                     {#each Object.entries(toolStatus) as [service, status]}
-                        <div class="service-item {status ? 'running' : 'stopped'}">
+                        <div class="service-item {getServiceClass(service, status)}">
                             <svelte:component 
-                                this={getServiceIcon(status)} 
+                                this={getServiceIcon(service, status)} 
                                 size={16}
                             />
                             <span class="service-name">{service}</span>
@@ -83,7 +105,7 @@
                     <p>{workspace.ip_range}</p>
                 </a>
             {/each}
-            <button class="new-workspace-card" on:click={() => goto('/workspace/new')}>
+            <button class="new-workspace-card" on:click={() => goto('/workspace/create/name')}>
                 <span class="plus">+</span>
                 <span>New Workspace</span>
             </button>
@@ -200,6 +222,11 @@
         padding: 0.5rem;
         border-radius: 0.25rem;
         font-size: 0.875rem;
+    }
+
+    .service-item.installed-not-running {
+        color: #f97316; /* Orange color */
+        background-color: #fff7ed;
     }
 
     .service-item.running {

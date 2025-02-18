@@ -1,131 +1,185 @@
 <script lang="ts">
-    export let data: any[];
+    import CredentialsTable from './CredentialsTable.svelte';
+    import { invoke } from "@tauri-apps/api/core";
+    import SvelteMarkdown from 'svelte-markdown';
+    export let data: Array<any> = [];
+    export let details: Array<string> = [];
+    export let workspaceId: number;
+    export let machineId: number;
+    export let portNumber: number;
 
-    function formatCredential(cred: any) {
-        const name = cred.name || 'unknown';
-        const hash = cred.hash || '';
-        const password = cred.password ? cred.password : '';
-        return { name, hash, password };
-    }
+    // Filter credentials and notes
+    $: credentials = data.filter(note => 'Credentials' in note);
+    $: pentestNotes = data.filter(note => note.PentestNote);
+    $: nmapNotes = data.filter(note => 'NmapScan' in note);
 
-    function groupNotesByType(notes: any[]) {
-        const grouped = {
-            nmap: [] as string[],
-            credentials: [] as any[]
-        };
-
-        notes.forEach(note => {
-            if (note.NmapScan) {
-                grouped.nmap.push(...note.NmapScan);
-            } else if (note.Credentials) {
-                grouped.credentials.push(formatCredential(note.Credentials));
+    async function handleBlur(index, event) {
+        const newContent = event.target.innerText;
+        // Find the actual index in the full data array
+        const noteIndex = data.findIndex(note => 
+            note.PentestNote && note.PentestNote.content === pentestNotes[index].PentestNote.content
+        );
+        
+        if (newContent !== pentestNotes[index].PentestNote.content) {
+            try {
+                await invoke('update_note_content', {
+                    workspaceId,
+                    machineId,
+                    portNumber,
+                    noteIndex,
+                    newContent
+                });
+                // Don't modify the local state - let the parent component refresh the data
+            } catch (error) {
+                console.error(error);
+                // Revert the content if there's an error
+                event.target.innerText = pentestNotes[index].PentestNote.content;
+                alert("Error updating note: " + error);
             }
-        });
-
-        return grouped;
+        }
     }
 
-    $: groupedNotes = groupNotesByType(data || []);
+    function formatTimestamp(timestamp: string) {
+        return new Date(timestamp).toLocaleString();
+    }
+
+    function processNmapNote(note) {
+        if (note.NmapScan[0] === "AI Security Analysis") {
+            let content = note.NmapScan[1];
+            try {
+                // Try to parse JSON response
+                const parsed = JSON.parse(content);
+                content = parsed.text || content;
+            } catch (e) {
+                // Not JSON, use as is
+                console.log('Not JSON format, using raw content');
+            }
+            return {
+                title: "AI Analysis",
+                content: content
+            };
+        }
+        // Regular Nmap scan results
+        return {
+            title: "Scan Results",
+            content: note.NmapScan.join('\n')
+        };
+    }
 </script>
 
+<div class="notes-container">
+    {#if data && data.length > 0}
+        {#if credentials.length > 0}
+            <CredentialsTable {credentials} />
+        {/if}
+
+        <!-- Pentest Notes -->
+        {#each pentestNotes as note, index}
+            <div class="note pentest-note">
+                <div class="note-header">
+                    <h3>{note.PentestNote.stage}</h3>
+                    <span class="timestamp">{formatTimestamp(note.PentestNote.timestamp)}</span>
+                </div>
+                <!-- Editable note content; blur will trigger a save -->
+                <p contenteditable="true" on:blur={(e) => handleBlur(index, e)} class="note-content">
+                    {note.PentestNote.content}
+                </p>
+            </div>
+        {/each}
+
+        <!-- Nmap and AI Analysis Results -->
+        {#each nmapNotes as note}
+            {@const processed = processNmapNote(note)}
+            <div class="note nmap-note">
+                <h3>{processed.title}</h3>
+                <div class="note-content">
+                    {#if processed.title === "AI Security Analysis"}
+                        <svelte:component this={SvelteMarkdown} source={processed.content} />
+                    {:else}
+                        {#each processed.content.split('\n') as line}
+                            <p>{line}</p>
+                        {/each}
+                    {/if}
+                </div>
+            </div>
+        {/each}
+    {:else}
+        <p class="no-notes">No notes available</p>
+    {/if}
+</div>
+
 <style>
-    .content {
+    .notes-container {
+        padding: 1rem;
         display: flex;
         flex-direction: column;
-        gap: 2rem;
+        gap: 1rem;
+    }
+
+    .note {
         padding: 1rem;
+        border-radius: 0.5rem;
+        border: 1px solid #e5e7eb;
     }
 
-    .note-section {
-        background-color: rgb(239, 239, 239);
-        border-radius: 1rem;
-        padding: 1rem;
+    .pentest-note {
+        background-color: #f0fdf4;
+        border-left: 4px solid #16a34a;
     }
 
-    .note-header {
-        font-size: larger;
-        font-weight: bold;
-        padding: 0.5rem 1rem;
-        border-bottom: 2px solid #ddd;
-        margin-bottom: 1rem;
-    }
-
-    .details-list {
-        list-style-type: none;
-        padding: 0.5rem 1rem;
-    }
-
-    .details-list li {
-        margin-bottom: 0.5rem;
+    .nmap-note {
+        background-color: #f1f5f9;
+        border-left: 4px solid #475569;
         font-family: monospace;
     }
 
-    .credential-entry {
+    .note-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        margin-bottom: 0.5rem;
+    }
+
+    .timestamp {
+        font-size: 0.875rem;
+        color: #6b7280;
+    }
+
+    .note-content {
+        white-space: pre-wrap;
+        outline: none;
         padding: 0.5rem;
-        border-bottom: 1px solid #ddd;
+        border: 1px dashed transparent;
     }
 
-    .credential-entry:last-child {
-        border-bottom: none;
+    .note-content:focus {
+        border-color: #16a34a;
+        background-color: #fcfdfc;
     }
 
-    .cred-left {
-        color: #0066cc;
-        font-weight: bold;
-    }
-
-    .cred-right {
-        color: #009900;
-        font-weight: bold;
-    }
-
-    .hash {
-        color: #666;
-        margin: 0 0.5rem;
-    }
-
-    .no-data {
+    .no-notes {
         text-align: center;
-        color: #666;
+        color: #6b7280;
         font-style: italic;
     }
+
+    .note-content :global(p) {
+        margin: 0.5rem 0;
+    }
+
+    .note-content :global(ul), .note-content :global(ol) {
+        margin: 0.5rem 0;
+        padding-left: 1.5rem;
+    }
+
+    .note-content :global(li) {
+        margin: 0.3rem 0;
+    }
+
+    .note-content :global(code) {
+        background-color: #f1f1f1;
+        padding: 0.2rem 0.4rem;
+        border-radius: 0.3rem;
+        font-family: monospace;
+    }
 </style>
-
-<div class="content">
-    {#if groupedNotes.nmap.length > 0}
-        <div class="note-section">
-            <div class="note-header">Nmap Scan Details</div>
-            <ul class="details-list">
-                {#each groupedNotes.nmap as detail}
-                    <li>{detail}</li>
-                {/each}
-            </ul>
-        </div>
-    {/if}
-
-    {#if groupedNotes.credentials.length > 0}
-        <div class="note-section">
-            <div class="note-header">Credentials</div>
-            {#each groupedNotes.credentials as cred}
-                <div class="credential-entry">
-                    <span class="cred-left">{cred.name}</span>
-                    {#if cred.hash}
-                        <span class="hash">{cred.hash}</span>
-                    {/if}
-                    {#if cred.password}
-                        <span class="cred-right">{cred.password}</span>
-                    {/if}
-                </div>
-            {/each}
-        </div>
-    {/if}
-
-    {#if !groupedNotes.nmap.length && !groupedNotes.credentials.length}
-        <div class="note-section">
-            <div class="no-data">No notes available</div>
-        </div>
-    {/if}
-</div>

@@ -576,8 +576,8 @@ async fn check_tools() -> Result<String, String> {
 
 #[tauri::command]
 async fn analyze_port(database: State<'_, Mutex<Database>>, workspace_id: u32, machine_id: u32, port_number: u16) -> Result<String, String> {
-    // Gather port info and create context in a separate scope
-    let context = {
+    // Get port info
+    let port_info = {
         let db = database.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
         let port = db.data.iter()
             .find(|w| w.id == workspace_id)
@@ -585,32 +585,30 @@ async fn analyze_port(database: State<'_, Mutex<Database>>, workspace_id: u32, m
             .and_then(|m| m.ports.iter().find(|p| p.number == port_number))
             .ok_or_else(|| "Port not found".to_string())?;
 
-        json!({
-            "text": format!(
-                "Analyze this port for security vulnerabilities:\n\
-                Service: {}\n\
-                Port: {}\n\
-                Protocol: {}\n\
-                State: {}\n\
-                Application: {}\n\n\
-                Scan Results:\n{}", 
-                port.service,
-                port.number,
-                port.protocol,
-                port.state,
-                port.application,
-                port.data.iter()
-                    .filter_map(|note| match note {
-                        PortNotes::NmapScan(details) => Some(details.join("\n")),
-                        _ => None
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
-        }).to_string()
+        format!(
+            "Analyze this port for security vulnerabilities:\n\
+            Service: {}\n\
+            Port: {}\n\
+            Protocol: {}\n\
+            State: {}\n\
+            Application: {}\n\n\
+            Scan Results:\n{}", 
+            port.service,
+            port.number,
+            port.protocol,
+            port.state,
+            port.application,
+            port.data.iter()
+                .filter_map(|note| match note {
+                    PortNotes::NmapScan(details) => Some(details.join("\n")),
+                    _ => None
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
     };
 
-    // Make the API call
+    // Make the API call with direct text prompt
     let client = reqwest::Client::new();
     let payload = json!({
         "question": format!(
@@ -620,7 +618,7 @@ async fn analyze_port(database: State<'_, Mutex<Database>>, workspace_id: u32, m
             2. Exploitation Methods\n\
             3. Security Recommendations\n\n\
             {}", 
-            context
+            port_info
         )
     });
 
@@ -633,7 +631,17 @@ async fn analyze_port(database: State<'_, Mutex<Database>>, workspace_id: u32, m
     let analysis = response.text().await
         .map_err(|e| format!("Failed to read AI response: {}", e))?;
 
-    println!("Received AI analysis, updating database...");
+    // Parse the response to extract just the text content
+    let clean_analysis = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&analysis) {
+        if let Some(text) = parsed.get("text") {
+            text.as_str().unwrap_or(&analysis).to_string()
+        } else {
+            analysis
+        }
+    } else {
+        analysis
+    };
+
     // Update database
     {
         let mut db = database.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
@@ -644,15 +652,14 @@ async fn analyze_port(database: State<'_, Mutex<Database>>, workspace_id: u32, m
             .ok_or_else(|| "Port not found".to_string())?;
 
         let ai_note = PortNotes::NmapScan(vec![
-            "=== AI Security Analysis ===".to_string(),
-            analysis
+            "AI Security Analysis".to_string(),
+            clean_analysis
         ]);
 
         port.data.push(ai_note);
         save_database(&db)?;
     }
 
-    println!("Analysis completed successfully");
     Ok("Analysis completed and saved".to_string())
 }
 
